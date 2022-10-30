@@ -227,7 +227,136 @@ int sock_sync_data(int sock, int xfer_size, char *local_data, char *remote_data)
 /******************************************************************************
 End of socket operations
 ******************************************************************************/
-
+/* poll_completion */
+/******************************************************************************
+* Function: poll_completion
+*
+* Input
+* res pointer to resources structure
+*
+* Output
+* none
+*
+* Returns
+* 0 on success, 1 on failure
+*
+* Description
+* 轮询完成队列中的单个事件，函数会轮询队列直到过了MAX_POLL_CQ_TIMEOUT milliseconds
+* Poll the completion queue for a single event. This function will continue to
+* poll the queue until MAX_POLL_CQ_TIMEOUT milliseconds have passed.
+*
+******************************************************************************/
+static int poll_completion(struct resources *res)
+{
+    
+	struct ibv_wc wc;
+	unsigned long start_time_msec;
+	unsigned long cur_time_msec;
+	struct timeval cur_time;
+	int poll_result;
+	int rc = 0;
+	/* poll the completion for a while before giving up of doing it .. */
+	gettimeofday(&cur_time, NULL);
+	start_time_msec = (cur_time.tv_sec * 1000) + (cur_time.tv_usec / 1000);
+	do
+	{
+		poll_result = ibv_poll_cq(res->cq, 1, &wc);
+		gettimeofday(&cur_time, NULL);
+		cur_time_msec = (cur_time.tv_sec * 1000) + (cur_time.tv_usec / 1000);
+	} while ((poll_result == 0) && ((cur_time_msec - start_time_msec) < MAX_POLL_CQ_TIMEOUT));
+	if (poll_result < 0)
+	{
+		/* poll CQ failed */
+		fprintf(stderr, "poll CQ failed\n");
+		rc = 1;
+	}
+	else if (poll_result == 0)
+	{ /* the CQ is empty */
+		fprintf(stderr, "completion wasn't found in the CQ after timeout\n");
+		rc = 1;
+	}
+	else
+	{
+		/* CQE found */
+		fprintf(stdout, "completion was found in CQ with status 0x%x\n", wc.status);
+		/* check the completion status (here we don't care about the completion opcode */
+		if (wc.status != IBV_WC_SUCCESS)
+		{
+			fprintf(stderr, "got bad completion with status: 0x%x, vendor syndrome: 0x%x\n", wc.status,
+					wc.vendor_err);
+			rc = 1;
+		}
+	}
+	return rc;
+}
+/******************************************************************************
+* Function: post_send
+*
+* Input
+* res pointer to resources structure
+* opcode IBV_WR_SEND, IBV_WR_RDMA_READ or IBV_WR_RDMA_WRITE
+*
+* Output
+* none
+*
+* Returns
+* 0 on success, error code on failure
+*
+* Description
+* This function will create and post a send work request
+******************************************************************************/
+static int post_send(struct resources *res, int opcode)
+{
+    //创建发送任务ibv_send_wr
+	struct ibv_send_wr sr;
+	struct ibv_sge sge;
+	struct ibv_send_wr *bad_wr = NULL;
+	int rc;
+	/* 
+    把要发送的数据的内存地址，大小，密钥告诉HCA
+    prepare the scatter/gather entry */
+	memset(&sge, 0, sizeof(sge));
+	sge.addr = (uintptr_t)res->buf;
+	sge.length = MSG_SIZE;
+	sge.lkey = res->mr->lkey;
+	/* prepare the send work request */
+	memset(&sr, 0, sizeof(sr));
+	sr.next = NULL;
+	sr.wr_id = 0;
+	sr.sg_list = &sge;
+	sr.num_sge = 1;
+	sr.opcode = opcode;
+	sr.send_flags = IBV_SEND_SIGNALED;
+    //Read/Write还需要告诉HCA远程的内存地址和密钥
+	if (opcode != IBV_WR_SEND)
+	{
+		sr.wr.rdma.remote_addr = res->remote_props.addr;
+		sr.wr.rdma.rkey = res->remote_props.rkey;
+	}
+	/* there is a Receive Request in the responder side, so we won't get any into RNR flow */
+	rc = ibv_post_send(res->qp, &sr, &bad_wr);
+	if (rc)
+		fprintf(stderr, "failed to post SR\n");
+	else
+	{
+		switch (opcode)
+		{
+		case IBV_WR_SEND:
+			fprintf(stdout, "Send Request was posted\n");
+			break;
+		case IBV_WR_RDMA_READ:
+			fprintf(stdout, "RDMA Read Request was posted\n");
+			break;
+		case IBV_WR_RDMA_WRITE:
+			fprintf(stdout, "RDMA Write Request was posted\n");
+			break;
+		default:
+			fprintf(stdout, "Unknown Request was posted\n");
+			break;
+		}
+	}
+	return rc;
+}
 /******************************************************************************
 * Function: post_receive
 *
@@ -600,7 +729,40 @@ static int modify_qp_to_rtr(struct ibv_qp *qp, uint32_t remote_qpn, uint16_t dli
 		fprintf(stderr, "failed to modify QP state to RTR\n");
 	return rc;
 }
-
+/******************************************************************************
+* Function: modify_qp_to_rts
+*
+* Input
+* qp QP to transition
+*
+* Output
+* none
+*
+* Returns
+* 0 on success, ibv_modify_qp failure code on failure
+*
+* Description
+* Transition a QP from the RTR to RTS state
+******************************************************************************/
+static int modify_qp_to_rts(struct ibv_qp *qp)
+{
+	struct ibv_qp_attr attr;
+	int flags;
+	int rc;
+	memset(&attr, 0, sizeof(attr));
+	attr.qp_state = IBV_QPS_RTS;
+	attr.timeout = 0x12;
+	attr.retry_cnt = 6;
+	attr.rnr_retry = 0;
+	attr.sq_psn = 0;
+	attr.max_rd_atomic = 1;
+	flags = IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
+			IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC;
+	rc = ibv_modify_qp(qp, &attr, flags);
+	if (rc)
+		fprintf(stderr, "failed to modify QP state to RTS\n");
+	return rc;
+}
 /******************************************************************************
 * Function: connect_qp
 *
@@ -918,7 +1080,82 @@ int main(int argc, char *argv[]){
 		fprintf(stderr, "failed to connect QPs\n");
 		goto main_exit;
 	}
+	/* let the server post the sr(send request) */
+    // 在连接QP的时候有:"let the client post RR to be prepared for incoming messages"；所以此时客户端已经准备好了
+    // 发送任务有三种操作：Send,Read,Write；Send操作需要对方执行相应的Receive操作;Read/Write直接操作对方内存，对方无感知
+	if (!config.server_name)
+		if (post_send(&res, IBV_WR_SEND))
+		{
+			fprintf(stderr, "failed to post sr\n");
+			goto main_exit;
+		}
+    
+    /* in both sides we expect to get a completion */
+	if (poll_completion(&res))
+	{
+		fprintf(stderr, "poll completion failed\n");
+		goto main_exit;
+	}
+    /* after polling the completion we have the message in the client buffer too */
+	if (config.server_name)
+		fprintf(stdout, "Message is: '%s'\n", res.buf);
+	else
+	{
+		/* setup server buffer with read message */
+		strcpy(res.buf, RDMAMSGR);
+	}
+	/* Sync so we are sure server side has data ready before client tries to read it */
+	if (sock_sync_data(res.sock, 1, "R", &temp_char)) /* just send a dummy char back and forth */
+	{
+		fprintf(stderr, "sync error before RDMA ops\n");
+		rc = 1;
+		goto main_exit;
+	}     
 
+	/* Now the client performs an RDMA read and then write on server.
+Note that the server has no idea these events have occured */
+	if (config.server_name)
+	{
+		/* First we read contens of server's buffer */
+		if (post_send(&res, IBV_WR_RDMA_READ))
+		{
+			fprintf(stderr, "failed to post SR 2\n");
+			rc = 1;
+			goto main_exit;
+		}
+		if (poll_completion(&res))
+		{
+			fprintf(stderr, "poll completion failed 2\n");
+			rc = 1;
+			goto main_exit;
+		}
+		fprintf(stdout, "Contents of server's buffer: '%s'\n", res.buf);
+		/* Now we replace what's in the server's buffer */
+		strcpy(res.buf, RDMAMSGW);
+		fprintf(stdout, "Now replacing it with: '%s'\n", res.buf);
+		if (post_send(&res, IBV_WR_RDMA_WRITE))
+		{
+			fprintf(stderr, "failed to post SR 3\n");
+			rc = 1;
+			goto main_exit;
+		}
+		if (poll_completion(&res))
+		{
+			fprintf(stderr, "poll completion failed 3\n");
+			rc = 1;
+			goto main_exit;
+		}
+	}         
+	/* Sync so server will know that client is done mucking with its memory */
+	if (sock_sync_data(res.sock, 1, "W", &temp_char)) /* just send a dummy char back and forth */
+	{
+		fprintf(stderr, "sync error after RDMA ops\n");
+		rc = 1;
+		goto main_exit;
+	}
+	if (!config.server_name)
+		fprintf(stdout, "Contents of server buffer: '%s'\n", res.buf);
+	rc = 0;  
 main_exit:
 	if (resources_destroy(&res))
 	{
