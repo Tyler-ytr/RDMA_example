@@ -69,7 +69,7 @@ ops */
 struct config_t config = {
 	NULL,  /* dev_name */
 	NULL,  /* server_name */
-	19875, /* tcp_port */
+	19873, /* tcp_port */
 	1,	 /* ib_port */
 	-1 /* gid_idx */
 };
@@ -125,6 +125,7 @@ static int sock_connect(const char *servername, int port){
     //servername:IP地址，如果是null那么适合作为主机，service:端口号,hint里面是配置，结果在resolved_addr里面是一个链表，通过ai_next连接
 	//返回值0表示成功，非0表示出错
     sockfd = getaddrinfo(servername, service, &hints, &resolved_addr);  
+	
        
 	if (sockfd < 0)
 	{
