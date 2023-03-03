@@ -3,9 +3,9 @@
  * @version: 
  * @Author: tylerytr
  * @Date: 2022-10-30 22:25:57
- * @LastEditTime: 2022-11-18 14:01:12
+ * @LastEditTime: 2023-03-03 21:32:33
  * @LastEditors: tylerytr
- * @FilePath: /tyleryin/worker/test/RDMA-EXAMPLE/mytest/README.md
+ * @FilePath: /nic_cas/README.md
  * Email:601576661@qq.com
  * Copyright (c) 2022 by tyleryin, All Rights Reserved. 
 -->
@@ -19,6 +19,11 @@
  2. 走ROCE:
        服务端：./service   -g  0
        客户端：./service -g 0  服务端IP
+## 对应接口
+1. ibv_exp_alloc_dm()/ibv_exp_free_dm() - to allocate/free device memory
+2. ibv_exp_reg_mr - to register the allocated device memory buffer as a memory region and get a memory key for local/remote access by the device(将已分配的设备内存缓冲区注册为一个内存区域，并获得一个用于设备本地/远程访问的内存区域(mr))
+3. ibv_exp_memcpy_dm - to copy data to/from a device memory buffer(从/往设备内存拷贝数据)
+4. ibv_post_send/ibv_post_receive - to request the device to perform a send/receive operation using the memory key
 
 ## 样例流程
 1. 接受输入变量，初始化自定义结构体resource；
@@ -70,3 +75,6 @@
       这里的mlx5_1来自于ibv_devinfo；不能用ifconfigure里面的那个网卡号（不然抓不到ROCE协议只能看见TCP)
    1. 启动服务端以及客户端
 
+## 参考部分
+1. https://docs.nvidia.com/networking/display/MLNXOFEDv461000/Programming
+2. https://github.com/thustorage/Sherman/blob/main/src/rdma/Resource.cpp#L139

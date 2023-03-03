@@ -568,8 +568,55 @@ static int resources_create(struct resources *res){
 	else
 		memset(res->buf, 0, size);
     /* register the memory buffer */
-	mr_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
-	res->mr = ibv_reg_mr(res->pd, res->buf, size, mr_flags);
+	//注册on-chip片上内存，
+	//非片上内存版本:
+	// mr_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
+	// res->mr = ibv_reg_mr(res->pd, res->buf, size, mr_flags);
+	//1. 从设备Allocate on-chip memory
+	struct ibv_exp_alloc_dm_attr dm_attr;
+	memset(&dm_attr, 0, sizeof(dm_attr));
+	const uint64_t kLockChipMemSize = 128 * 1024;//片上内存大小
+	const uint64_t kLockStartAddr = 0;//片上内存起始地址
+	uint64_t mmSize=kLockChipMemSize;
+	uint64_t mm=kLockStartAddr;
+	dm_attr.length = mmSize;
+	struct ibv_exp_dm *dm = ibv_exp_alloc_dm(res->ib_ctx, &dm_attr);
+	if (!dm) {
+		fprintf(stderr,"Allocate on-chip memory failed");
+		goto resources_create_exit;
+  	}
+	//2. 注册内存区域
+	/* Device memory registration as memory region */
+	struct ibv_exp_reg_mr_in mr_in;
+	memset(&mr_in, 0, sizeof(mr_in));
+	mr_in.pd = res->pd, mr_in.addr = (void *)mm, mr_in.length = mmSize,
+    mr_in.exp_access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
+                     IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC,
+
+	mr_in.create_flags = 0;
+	mr_in.dm = dm;
+	mr_in.comp_mask = IBV_EXP_REG_MR_DM;
+	struct ibv_mr *mr = ibv_exp_reg_mr(&mr_in);
+	if (!mr) {
+		fprintf(stderr,"Memory registration failed");
+		goto resources_create_exit;
+  	}
+	//3. 往内存拷贝数据(清0)，其中ibv_exp_dm_memcpy_dir cpy_attr中的两个数值表示了是设备里面拷贝(IBV_EXP_DM_CPY_TO_DEVICE),还是拷贝到宿主(IBV_EXP_DM_CPY_TO_HOST)
+	char *buffer = (char *)malloc(mmSize);
+ 	memset(buffer, 0, mmSize);
+	
+	struct ibv_exp_memcpy_dm_attr cpy_attr;
+	memset(&cpy_attr, 0, sizeof(cpy_attr));
+	cpy_attr.memcpy_dir = IBV_EXP_DM_CPY_TO_DEVICE;
+	cpy_attr.host_addr = (void *)buffer;
+	cpy_attr.length = mmSize;
+	cpy_attr.dm_offset = 0;
+	ibv_exp_memcpy_dm(dm, &cpy_attr);
+	free(buffer);
+
+	res->mr=mr;
+
+
 	if (!res->mr)
 	{
 		fprintf(stderr, "ibv_reg_mr failed with mr_flags=0x%x\n", mr_flags);
