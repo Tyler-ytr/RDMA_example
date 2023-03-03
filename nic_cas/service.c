@@ -16,7 +16,7 @@
 #include <netdb.h>
 
 #define MAX_POLL_CQ_TIMEOUT 2000
-#define MSG "SEND operation "
+#define MSG "SEND operation\0 "
 #define RDMAMSGR "RDMA read operation "
 #define RDMAMSGW "RDMA write operation"
 #define MSG_SIZE (strlen(MSG) + 1)
@@ -550,23 +550,26 @@ static int resources_create(struct resources *res){
 	}
 	/* 注册Mmeory Region来存放数据
        分配内存空间 */
-	size = MSG_SIZE;
-	res->buf = (char *)malloc(size);
-	if (!res->buf)
-	{
-		fprintf(stderr, "failed to malloc %Zu bytes to memory buffer\n", size);
-		rc = 1;
-		goto resources_create_exit;
-	}
-	memset(res->buf, 0, size);
+	//device memory使用的时候,buf的地址是0;
+	// res->buf=0;
+	// size = MSG_SIZE;
+	// res->buf = (char *)malloc(size);
+	// if (!res->buf)
+	// {
+	// 	fprintf(stderr, "failed to malloc %Zu bytes to memory buffer\n", size);
+	// 	rc = 1;
+	// 	goto resources_create_exit;
+	// }
+	// memset(res->buf, 0, size);
+	// !config.server_name 表示客户端(发送端)
 	/* only in the server side put the message in the memory buffer */
-	if (!config.server_name)
-	{
-		strcpy(res->buf, MSG);
-		fprintf(stdout, "going to send the message: '%s'\n", res->buf);
-	}
-	else
-		memset(res->buf, 0, size);
+	// if (!config.server_name)
+	// {
+	// 	strcpy(res->buf, MSG);
+	// 	fprintf(stdout, "going to send the message: '%s'\n", res->buf);
+	// }
+	// else
+	// 	memset(res->buf, 0, size);
     /* register the memory buffer */
 	//注册on-chip片上内存，
 	//非片上内存版本:
@@ -604,6 +607,11 @@ static int resources_create(struct resources *res){
 	//3. 往内存拷贝数据(清0)，其中ibv_exp_dm_memcpy_dir cpy_attr中的两个数值表示了是设备里面拷贝(IBV_EXP_DM_CPY_TO_DEVICE),还是拷贝到宿主(IBV_EXP_DM_CPY_TO_HOST)
 	char *buffer = (char *)malloc(mmSize);
  	memset(buffer, 0, mmSize);
+	if (!config.server_name){
+		strcpy(buffer, MSG);
+
+		fprintf(stderr,"Things in buffer: %s;It will be on-chip\n", buffer);
+	}
 	
 	struct ibv_exp_memcpy_dm_attr cpy_attr;
 	memset(&cpy_attr, 0, sizeof(cpy_attr));
@@ -615,6 +623,7 @@ static int resources_create(struct resources *res){
 	free(buffer);
 
 	res->mr=mr;
+	res->buf=0;
 
 
 	if (!res->mr)
@@ -1131,13 +1140,13 @@ int main(int argc, char *argv[]){
 	/* let the server post the sr(send request) */
     // 在连接QP的时候有:"let the client post RR to be prepared for incoming messages"；所以此时客户端已经准备好了
     // 发送任务有三种操作：Send,Read,Write；Send操作需要对方执行相应的Receive操作;Read/Write直接操作对方内存，对方无感知
-	if (!config.server_name)
+	if (!config.server_name){
 		if (post_send(&res, IBV_WR_SEND))
 		{
 			fprintf(stderr, "failed to post sr\n");
 			goto main_exit;
 		}
-    
+	}
     /* in both sides we expect to get a completion */
 	if (poll_completion(&res))
 	{
