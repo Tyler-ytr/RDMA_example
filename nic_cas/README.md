@@ -21,6 +21,7 @@
        客户端：./service -g 0  服务端IP
 
 服务端(!config.server_name)开辟片上内存并注册为memory region，客户端(config.server_name)对其读写;
+目前内存区域的大小是128KB(kLockChipMemSize),可以根据nic_mem显示的大小自行修改;
 ## 对应接口
 1. ibv_exp_alloc_dm()/ibv_exp_free_dm() - to allocate/free device memory
 2. ibv_exp_reg_mr - to register the allocated device memory buffer as a memory region and get a memory key for local/remote access by the device(将已分配的设备内存缓冲区注册为一个内存区域，并获得一个用于设备本地/远程访问的内存区域(mr))
