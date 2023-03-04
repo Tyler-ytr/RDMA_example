@@ -3,13 +3,13 @@
  * @version: 
  * @Author: tylerytr
  * @Date: 2022-10-30 22:25:57
- * @LastEditTime: 2023-03-04 15:26:00
+ * @LastEditTime: 2023-03-04 15:30:14
  * @LastEditors: tylerytr
  * @FilePath: /mytest/nic_cas/README.md
  * Email:601576661@qq.com
  * Copyright (c) 2022 by tyleryin, All Rights Reserved. 
 -->
-# Mellanox RDMA文档中的样例以及抓包分析
+# RDMA 片上内存操作案例
 编译库的需求：`libibverbs `
 编译参数:GCC <文件名>  -o service  -libverbs
 运行方式：
@@ -19,6 +19,8 @@
  2. 走ROCE:
        服务端：./service   -g  0
        客户端：./service -g 0  服务端IP
+
+服务端(!config.server_name)开辟片上内存并注册为memory region，客户端(config.server_name)对其读写;
 ## 对应接口
 1. ibv_exp_alloc_dm()/ibv_exp_free_dm() - to allocate/free device memory
 2. ibv_exp_reg_mr - to register the allocated device memory buffer as a memory region and get a memory key for local/remote access by the device(将已分配的设备内存缓冲区注册为一个内存区域，并获得一个用于设备本地/远程访问的内存区域(mr))
@@ -75,6 +77,6 @@
       这里的mlx5_1来自于ibv_devinfo；不能用ifconfigure里面的那个网卡号（不然抓不到ROCE协议只能看见TCP)
    1. 启动服务端以及客户端
 
-## 参考部分
+## 片上内存使用参考
 1. https://docs.nvidia.com/networking/display/MLNXOFEDv461000/Programming
 2. https://github.com/thustorage/Sherman/blob/main/src/rdma/Resource.cpp#L139
