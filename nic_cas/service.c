@@ -17,9 +17,11 @@
 
 #define MAX_POLL_CQ_TIMEOUT 2000
 #define MSG "SEND operation\0 "
-#define RDMAMSGR "RDMA read operation "
-#define RDMAMSGW "RDMA write operation"
+#define RDMAMSGR "RDMA read operation \0"
+#define RDMAMSGW "RDMA write operation \0"
 #define MSG_SIZE (strlen(MSG) + 1)
+#define RDMAMSGR_SIZE (strlen(RDMAMSGR) + 1)
+#define RDMAMSGW_SIZE (strlen(RDMAMSGW) + 1)
 
 #if __BYTE_ORDER == __LITTLE_ENDIAN
 static inline uint64_t htonll(uint64_t x) { return bswap_64(x); }
@@ -1029,6 +1031,30 @@ static void show_onchip_memory(uint64_t mmSize,uint64_t dm_offset,struct resourc
 
 }
 
+/*******************************************************************
+ * @brief : 往片上内存的指定位置写入数据(可能会覆盖之前的数据);
+ * @param {uint64_t} mmSize
+ * @param {uint64_t} dm_offset
+ * @param {resources} *res
+ * @param {char*} message
+ * @return {*}
+ * @description: 
+*******************************************************************/
+static void write_onchip_memory(uint64_t mmSize,uint64_t dm_offset,struct resources *res,const char* message){
+	char *buffer = (char *)malloc(mmSize);
+	strcpy(buffer,message);
+
+	struct ibv_exp_memcpy_dm_attr cpy_attr;
+	memset(&cpy_attr, 0, sizeof(cpy_attr));
+	cpy_attr.memcpy_dir = IBV_EXP_DM_CPY_TO_DEVICE;
+	cpy_attr.host_addr = (void *)buffer;
+	cpy_attr.length = mmSize;
+	cpy_attr.dm_offset = dm_offset;
+	ibv_exp_memcpy_dm(res->mydm, &cpy_attr);
+
+	return ;
+}
+
 /******************************************************************************
 * Function: print_config
 *
@@ -1190,6 +1216,10 @@ int main(int argc, char *argv[]){
 	{
 		/* setup server buffer with read message */
 		//strcpy(res.buf, RDMAMSGR);
+		printf("[server]:Write RDMAMSGR into on-chip memory\n");
+		write_onchip_memory(RDMAMSGR_SIZE,0,&res,RDMAMSGR);
+		printf("[server]:Show on-chip memory,it shoule be:RDMA read operation \n");
+		show_onchip_memory(RDMAMSGR_SIZE,0,&res);
 
 	}
 	/* Sync so we are sure server side has data ready before client tries to read it */
@@ -1241,8 +1271,11 @@ Note that the server has no idea these events have occured */
 		rc = 1;
 		goto main_exit;
 	}
-	if (!config.server_name)
-		fprintf(stdout, "Contents of server buffer: '%s'\n", res.buf);
+	if (!config.server_name){
+		fprintf(stdout, "Contents of server buffer: ");
+		show_onchip_memory(RDMAMSGW_SIZE,0,&res);
+		//fprintf(stdout, "Contents of server buffer: '%s'\n", res.buf);
+	}
 	rc = 0;  
 main_exit:
 	if (resources_destroy(&res))

@@ -3,7 +3,7 @@
  * @version: 
  * @Author: tylerytr
  * @Date: 2022-10-30 22:25:57
- * @LastEditTime: 2023-03-04 14:24:07
+ * @LastEditTime: 2023-03-04 15:26:00
  * @LastEditors: tylerytr
  * @FilePath: /mytest/nic_cas/README.md
  * Email:601576661@qq.com
@@ -46,18 +46,18 @@
    5. 从RTR转换到RTS
    6. 使用socket发送Q保证双方处于可以连接的状态；
 
-4.  进行数据收发：
+4.  进行数据收发：(这里的buf对于服务端指的是片上内存上面的内容,对于客户端指的是一般开辟的内存空间)
     1.  如果是服务器，因为3.4客户端创建了接受任务，所以可以使用send，这里使用`IBV_WR_SEND`进行send操作；
     2.  两端进行轮询拉取数据
     3.  如果是客户端，输出buf里面的数据；如果是服务端，往自己的buf里面放东西RDMAMSGR；
     4.  使用sokcet发送R保证双方可以连接；
     5.  如果是客户端：
-        1. 使用RDMA read操作读取server端的buf；
+        1. 使用RDMA read操作读取server端的buf;
         2. 轮询拉取数据，输出数据
         3. 使用RDMA WRITE发送数据
         4. 轮询拉去数据
     6.  如果是服务端：
-        1. 输出buf数据
+        1. 输出对应的片上内存内容(show_onchip_memory)
 5. 释放各类资源
 
 ## 实验室实验命令
