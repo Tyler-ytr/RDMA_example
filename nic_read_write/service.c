@@ -16,7 +16,7 @@
 #include <netdb.h>
 
 #define MAX_POLL_CQ_TIMEOUT 2000
-#define MSG "SEND operation\0 "
+#define MSG "RDMA SEND operation\0 "
 #define RDMAMSGR "RDMA read operation \0"
 #define RDMAMSGW "RDMA write operation \0"
 #define MSG_SIZE (strlen(MSG) + 1)
