@@ -65,6 +65,7 @@ struct resources
 	char *buf;						   /* memory buffer pointer, used for RDMA and send
 ops */
 	int sock;						   /* TCP socket file descriptor */
+	struct ibv_exp_dm *mydm;           //本机开辟的on-chip device memory
 };
 struct config_t config = {
 	NULL,  /* dev_name */
@@ -550,80 +551,77 @@ static int resources_create(struct resources *res){
 	}
 	/* 注册Mmeory Region来存放数据
        分配内存空间 */
-	//device memory使用的时候,buf的地址是0;
-	// res->buf=0;
-	// size = MSG_SIZE;
-	// res->buf = (char *)malloc(size);
-	// if (!res->buf)
-	// {
-	// 	fprintf(stderr, "failed to malloc %Zu bytes to memory buffer\n", size);
-	// 	rc = 1;
-	// 	goto resources_create_exit;
-	// }
-	// memset(res->buf, 0, size);
-	// !config.server_name 表示客户端(发送端)
-	/* only in the server side put the message in the memory buffer */
-	// if (!config.server_name)
-	// {
-	// 	strcpy(res->buf, MSG);
-	// 	fprintf(stdout, "going to send the message: '%s'\n", res->buf);
-	// }
-	// else
-	// 	memset(res->buf, 0, size);
-    /* register the memory buffer */
-	//注册on-chip片上内存，
-	//非片上内存版本:
-	// mr_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
-	// res->mr = ibv_reg_mr(res->pd, res->buf, size, mr_flags);
-	//1. 从设备Allocate on-chip memory
-	struct ibv_exp_alloc_dm_attr dm_attr;
-	memset(&dm_attr, 0, sizeof(dm_attr));
-	const uint64_t kLockChipMemSize = 128 * 1024;//片上内存大小
-	const uint64_t kLockStartAddr = 0;//片上内存起始地址
-	uint64_t mmSize=kLockChipMemSize;
-	uint64_t mm=kLockStartAddr;
-	dm_attr.length = mmSize;
-	struct ibv_exp_dm *dm = ibv_exp_alloc_dm(res->ib_ctx, &dm_attr);
-	if (!dm) {
-		fprintf(stderr,"Allocate on-chip memory failed");
-		goto resources_create_exit;
-  	}
-	//2. 注册内存区域
-	/* Device memory registration as memory region */
-	struct ibv_exp_reg_mr_in mr_in;
-	memset(&mr_in, 0, sizeof(mr_in));
-	mr_in.pd = res->pd, mr_in.addr = (void *)mm, mr_in.length = mmSize,
-    mr_in.exp_access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
-                     IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC,
 
-	mr_in.create_flags = 0;
-	mr_in.dm = dm;
-	mr_in.comp_mask = IBV_EXP_REG_MR_DM;
-	struct ibv_mr *mr = ibv_exp_reg_mr(&mr_in);
-	if (!mr) {
-		fprintf(stderr,"Memory registration failed");
-		goto resources_create_exit;
-  	}
-	//3. 往内存拷贝数据(清0)，其中ibv_exp_dm_memcpy_dir cpy_attr中的两个数值表示了是设备里面拷贝(IBV_EXP_DM_CPY_TO_DEVICE),还是拷贝到宿主(IBV_EXP_DM_CPY_TO_HOST)
-	char *buffer = (char *)malloc(mmSize);
- 	memset(buffer, 0, mmSize);
+	//对于服务端,创建片上内存并且进行一定的初始化;对于客户端，在普通的内存中注册并初始化'
 	if (!config.server_name){
-		strcpy(buffer, MSG);
+		//1. 从设备Allocate on-chip memory
+		struct ibv_exp_alloc_dm_attr dm_attr;
+		memset(&dm_attr, 0, sizeof(dm_attr));
+		const uint64_t kLockChipMemSize = 128 * 1024;//片上内存大小
+		const uint64_t kLockStartAddr = 0;//片上内存起始地址
+		uint64_t mmSize=kLockChipMemSize;
+		uint64_t mm=kLockStartAddr;
+		dm_attr.length = mmSize;
+		struct ibv_exp_dm *dm = ibv_exp_alloc_dm(res->ib_ctx, &dm_attr);
+		if (!dm) {
+			fprintf(stderr,"Allocate on-chip memory failed");
+			goto resources_create_exit;
+		}
 
-		fprintf(stderr,"Things in buffer: %s;It will be on-chip\n", buffer);
+		//2. 注册内存区域
+		/* Device memory registration as memory region */
+		struct ibv_exp_reg_mr_in mr_in;
+		memset(&mr_in, 0, sizeof(mr_in));
+		mr_in.pd = res->pd, mr_in.addr = (void *)mm, mr_in.length = mmSize,
+		mr_in.exp_access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
+						IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC,
+
+		mr_in.create_flags = 0;
+		mr_in.dm = dm;
+		mr_in.comp_mask = IBV_EXP_REG_MR_DM;
+		struct ibv_mr *mr = ibv_exp_reg_mr(&mr_in);
+		if (!mr) {
+			fprintf(stderr,"Memory registration failed");
+			goto resources_create_exit;
+		}
+		//3. 往内存拷贝数据(清0)，其中ibv_exp_dm_memcpy_dir cpy_attr中的两个数值表示了是设备里面拷贝(IBV_EXP_DM_CPY_TO_DEVICE),还是拷贝到宿主(IBV_EXP_DM_CPY_TO_HOST)
+		char *buffer = (char *)malloc(mmSize);
+		memset(buffer, 0, mmSize);
+		if (!config.server_name){
+			strcpy(buffer, MSG);
+
+			fprintf(stderr,"Things in buffer: %s;It will be on-chip\n", buffer);
+		}
+		
+		struct ibv_exp_memcpy_dm_attr cpy_attr;
+		memset(&cpy_attr, 0, sizeof(cpy_attr));
+		cpy_attr.memcpy_dir = IBV_EXP_DM_CPY_TO_DEVICE;
+		cpy_attr.host_addr = (void *)buffer;
+		cpy_attr.length = mmSize;
+		cpy_attr.dm_offset = 0;
+		ibv_exp_memcpy_dm(dm, &cpy_attr);
+		free(buffer);
+
+		res->mr=mr;
+		res->buf=0;
+		res->mydm=dm;
+	}else if(config.server_name){
+		size = MSG_SIZE;
+		res->buf = (char *)malloc(size);
+		if (!res->buf)
+		{
+			fprintf(stderr, "failed to malloc %Zu bytes to memory buffer\n", size);
+			rc = 1;
+			goto resources_create_exit;
+		}
+		memset(res->buf, 0, size);
+		memset(res->buf, 0, size);
+		/* register the memory buffer */
+		mr_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
+		res->mr = ibv_reg_mr(res->pd, res->buf, size, mr_flags);
+		res->mydm=NULL;
 	}
-	
-	struct ibv_exp_memcpy_dm_attr cpy_attr;
-	memset(&cpy_attr, 0, sizeof(cpy_attr));
-	cpy_attr.memcpy_dir = IBV_EXP_DM_CPY_TO_DEVICE;
-	cpy_attr.host_addr = (void *)buffer;
-	cpy_attr.length = mmSize;
-	cpy_attr.dm_offset = 0;
-	ibv_exp_memcpy_dm(dm, &cpy_attr);
-	free(buffer);
 
-	res->mr=mr;
-	res->buf=0;
 
 
 	if (!res->mr)
@@ -911,6 +909,7 @@ static int connect_qp(struct resources *res){
 		goto connect_qp_exit;
 	}
 	/* let the client post RR to be prepared for incoming messages */
+	// 客户端往QP冲发布receive request来为到来的send做准备;
 	if (config.server_name)
 	{
 		rc = post_receive(res);
@@ -1006,6 +1005,30 @@ static int resources_destroy(struct resources *res)
 		}
 	return rc;
 }
+/*******************************************************************
+ * @brief : 从本设备的on-chip memory的起始位置+dm_offest的位置读出mmSize的数据并且打印;
+ * @param {uint64_t} mmSize
+ * @param {uint64_t} dm_offset
+ * @param {resources} *res
+ * @return {*}
+ * @description: mmSize 表示从on-chip memory拿出的长度，dm_offset表示偏移量;res中的mydm保存了resources_create中的设备内存指针(ibv_exp_dm*);
+*******************************************************************/
+static void show_onchip_memory(uint64_t mmSize,uint64_t dm_offset,struct resources *res){
+	
+	char *buffer = (char *)malloc(mmSize);
+	struct ibv_exp_memcpy_dm_attr cpy_attr;
+	memset(&cpy_attr, 0, sizeof(cpy_attr));
+	cpy_attr.memcpy_dir = IBV_EXP_DM_CPY_TO_HOST;
+	cpy_attr.host_addr = (void *)buffer;
+	cpy_attr.length = mmSize;
+	cpy_attr.dm_offset = dm_offset;
+	ibv_exp_memcpy_dm(res->mydm, &cpy_attr);
+	//打印buffer
+	printf("%.*s\n",(int)mmSize,buffer);
+	return ;
+
+}
+
 /******************************************************************************
 * Function: print_config
 *
@@ -1131,6 +1154,12 @@ int main(int argc, char *argv[]){
 		fprintf(stderr, "failed to create resources\n");
 		goto main_exit;
 	}
+	
+	if (!config.server_name){
+		printf("[server]:Show on-chip memory with MSG_SIZE\n");
+		show_onchip_memory( MSG_SIZE,0,&res);
+	}
+	
     //连接QP
 	if (connect_qp(&res))
 	{
@@ -1141,6 +1170,7 @@ int main(int argc, char *argv[]){
     // 在连接QP的时候有:"let the client post RR to be prepared for incoming messages"；所以此时客户端已经准备好了
     // 发送任务有三种操作：Send,Read,Write；Send操作需要对方执行相应的Receive操作;Read/Write直接操作对方内存，对方无感知
 	if (!config.server_name){
+		fprintf(stdout, "before server send things\n");
 		if (post_send(&res, IBV_WR_SEND))
 		{
 			fprintf(stderr, "failed to post sr\n");
@@ -1159,7 +1189,8 @@ int main(int argc, char *argv[]){
 	else
 	{
 		/* setup server buffer with read message */
-		strcpy(res.buf, RDMAMSGR);
+		//strcpy(res.buf, RDMAMSGR);
+
 	}
 	/* Sync so we are sure server side has data ready before client tries to read it */
 	if (sock_sync_data(res.sock, 1, "R", &temp_char)) /* just send a dummy char back and forth */

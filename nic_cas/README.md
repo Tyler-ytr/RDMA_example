@@ -3,9 +3,9 @@
  * @version: 
  * @Author: tylerytr
  * @Date: 2022-10-30 22:25:57
- * @LastEditTime: 2023-03-03 21:32:33
+ * @LastEditTime: 2023-03-04 14:24:07
  * @LastEditors: tylerytr
- * @FilePath: /nic_cas/README.md
+ * @FilePath: /mytest/nic_cas/README.md
  * Email:601576661@qq.com
  * Copyright (c) 2022 by tyleryin, All Rights Reserved. 
 -->
@@ -34,7 +34,7 @@
       4. 查询RDMA设备端口信息(`ibv_query_port`)
       5. 分配一个Protection Domain(`ibv_alloc_pd`)
       6. 创建一个Complete Queue（`ibv_create_cq`）
-      7. 分配内存空间，注册Mmeory Region来存放数据（`ibv_reg_mr`）
+      7. 分配内存空间，在片上内存中开辟空间(`ibv_exp_alloc_dm`),把对应指针存入resource的mydm中;并且注册内存区域(`ibv_exp_reg_mr`);通过buffer往on-chip内存中写入`MSG`(`ibv_exp_memcpy_dm`);
       8. 创建Queue pair(`ibv_create_qp`)
 
 3. 连接QP，注意第2步结束的时候QP状态是RESET，
